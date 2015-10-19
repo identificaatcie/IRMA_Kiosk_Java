@@ -1,0 +1,26 @@
+apply plugin: 'java'
+apply plugin: 'maven'
+apply plugin: 'application'
+
+version = '1.0'
+mainClassName = "org.irmacard.irma_Kiosk.IRMAKiosk"
+applicationDefaultJvmArgs = ["-Djava.util.logging.config.file=logging.properties"]
+
+repositories {
+    mavenLocal()
+    maven {
+        url "https://credentials.github.io/repos/maven2/"
+    }
+    mavenCentral()
+}
+
+dependencies {
+    compile 'org.irmacard.idemix:idemix_terminal:0.9.1'
+    compile 'net.sf.scuba:scuba_sc_j2se:0.0.7-irma'
+	// Logging
+    compile 'org.slf4j:slf4j-jdk14:1.7.12'
+    compile 'com.google.http-client:google-http-client:1.20.0'
+    
+
+//    testCompile group: 'junit', name: 'junit', version: '4.11'
+}
