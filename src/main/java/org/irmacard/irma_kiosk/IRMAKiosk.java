@@ -3,6 +3,7 @@ package org.irmacard.irma_kiosk;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import net.sf.scuba.smartcards.CardService;
+import net.sf.scuba.smartcards.TerminalCardService;
 import org.irmacard.credentials.Attributes;
 import org.irmacard.credentials.CredentialsException;
 import org.irmacard.credentials.idemix.IdemixCredentials;
@@ -23,6 +24,8 @@ import com.google.api.client.json.JsonObjectParser;
 
 
 import javax.smartcardio.CardException;
+import javax.smartcardio.CardTerminal;
+import javax.smartcardio.TerminalFactory;
 import java.io.File;
 import java.io.IOException;
 import java.net.URI;
@@ -31,6 +34,7 @@ import java.nio.file.Paths;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Formatter;
+import java.util.List;
 
 /**
  * Created by wietse on 21-9-15.
@@ -40,15 +44,14 @@ public class IRMAKiosk {
     private HttpTransport transport;
     private JsonObjectParser jsonObjectParser;
     private final String apikey = "";
-    private final Boolean debug = true;
+    private final Boolean debug = false;
     private CardService cs;
     private IRMACard card;
     private JsonObject result;
     private String PIN;
 
 
-    public IRMAKiosk()
-    {
+    public IRMAKiosk() {
         transport = new NetHttpTransport.Builder().build();
 
         URI core = new File(System.getProperty("user.dir")).toURI().resolve("irma_configuration/");
@@ -56,23 +59,24 @@ public class IRMAKiosk {
         IdemixKeyStore.setCoreLocation(core);
 
         //Debug setup
+        try {
+            cs = getNewCardService();
+        } catch (CardException e) {
+            e.printStackTrace();
+        }
+        PIN="0000";
         if(debug)
         {
-            try{
-                cs = getNewCardService();
                 card = new IRMACard();
                 PIN = "0000";
                 //IssueThaliaRoot(cs,card);
                 IssueSurfnetRoot(cs, card);
-            } catch (CardException e) {
-                e.printStackTrace();
-            }
         }
-        result = VerifyThaliaRoot(cs);
+        result = verifyThaliaRoot(cs);
         if(result == null)
         {
             System.out.println("Failed to verify by thalia root. Verifying by surfnet root.");
-            result = VerifySurfnetRoot(cs);
+            result = verifySurfnetRoot(cs);
             if(result == null)
             {
                 System.out.println("Failed to verify by surfnet root. Ask the identificaatcie to fix your root credentials.");
@@ -80,7 +84,7 @@ public class IRMAKiosk {
             }
         }
         System.out.println("Verification succeeded!");
-        IssueThaliaCredentials(cs, card, result, PIN);
+        issueThaliaCredentials(cs, card, result, PIN);
         System.out.println("Issue succesful!");
 
     }
@@ -91,7 +95,7 @@ public class IRMAKiosk {
 
     }
 
-    public JsonObject VerifySurfnetRoot(CardService cs) {
+    public JsonObject verifySurfnetRoot(CardService cs) {
         try {
 
             IdemixVerificationDescription vd = new IdemixVerificationDescription(
@@ -128,7 +132,7 @@ public class IRMAKiosk {
 
 
 
-    public JsonObject VerifyThaliaRoot(CardService cs) {
+    public JsonObject verifyThaliaRoot(CardService cs) {
         try {
 
             IdemixVerificationDescription vd = new IdemixVerificationDescription(
@@ -162,19 +166,53 @@ public class IRMAKiosk {
     }
 
     public static CardService getNewCardService() throws CardException {
-        final Path path = Paths.get(System.getProperty("user.dir"), "card.json");
-        IRMACard card = IRMACardHelper.loadState(path);
-        SmartCardEmulatorService emu = new SmartCardEmulatorService(card);
-        emu.addListener(new CardChangedListener() {
-            @Override
-            public void cardChanged(IRMACard card) {
-                IRMACardHelper.storeState(card, path);
-            }
-        });
-        return emu;
+//        final Path path = Paths.get(System.getProperty("user.dir"), "card.json");
+        // For emulated card...
+//        IRMACard card =  new IRMACard();
+//        SmartCardEmulatorService emu = new SmartCardEmulatorService(card);
+//        return emu;
+
+        try {
+            return getPCSCCardService();
+        } catch (InfoException e) {
+            e.printStackTrace();
+            return null;
+        }
+
+        // For real pcsc smartcard
+
+
+
+//        emu.addListener(new CardChangedListener() {
+//            @Override
+//            public void cardChanged(IRMACard card) {
+//                IRMACardHelper.storeState(card, path);
+//            }
+//        });
     }
 
-    public void IssueThaliaCredentials(CardService cs, IRMACard card, JsonObject result,String PIN) {
+    public static CardService getPCSCCardService() throws InfoException, IllegalArgumentException {
+        List<CardTerminal> terminalList;
+        try {
+            terminalList = TerminalFactory.getDefault().terminals().list();
+        } catch (CardException e) {
+            throw new InfoException("No card readers connected.");
+        }
+        if(!terminalList.isEmpty()) {
+            int readerNr = 0;
+
+            try {
+                CardTerminal terminal = terminalList.get(readerNr);
+                return new TerminalCardService(terminal);
+            } catch (IndexOutOfBoundsException e) {
+                throw new IllegalArgumentException("Invalid PCSC reader Nr: pcsc://" + readerNr);
+            }
+        } else {
+            return null; // TODO error handling
+        }
+    }
+
+    public void issueThaliaCredentials(CardService cs, IRMACard card, JsonObject result,String PIN) {
 
         //Issue Membership attribute
         try {
@@ -188,13 +226,25 @@ public class IRMAKiosk {
             {
                 attributes.add("isMember", "yes".getBytes());
             }
-            else if(membership_type.contains("Honorary"))
+            else
+            {
+                attributes.add("isMember", "no".getBytes());
+            }
+            if(membership_type.contains("Honorary"))
             {
                 attributes.add("isHonoraryMember", "yes".getBytes());
             }
-            else if(membership_type.contains("Benefactor"))
+            else
+            {
+                attributes.add("isHonoraryMember", "no".getBytes());
+            }
+            if(membership_type.contains("Benefactor"))
             {
                 attributes.add("isBegunstiger", "yes".getBytes());
+            }
+            else
+            {
+                attributes.add("isBegunstiger", "no".getBytes());
             }
             // Setup a connection and send pin for emulated card service
             IdemixService is = new IdemixService(cs);
@@ -203,8 +253,8 @@ public class IRMAKiosk {
             is.sendPin(PIN.getBytes());
             System.out.println("ISK± " + isk + "attributes± " + attributes + "cd± " + cd);
             ic.issue(cd, isk, attributes, null); // null indicates default expiry
-            final Path path = Paths.get(System.getProperty("user.dir"), "card.json");
-            IRMACardHelper.storeState(card, path);
+//            final Path path = Paths.get(System.getProperty("user.dir"), "card.json");
+//            IRMACardHelper.storeState(card, path);
 
         } catch (Exception e) {
             e.printStackTrace();
