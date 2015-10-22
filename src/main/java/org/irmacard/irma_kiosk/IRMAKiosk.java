@@ -29,6 +29,7 @@ import javax.smartcardio.TerminalFactory;
 import java.io.File;
 import java.io.IOException;
 import java.net.URI;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.LocalDateTime;
@@ -43,8 +44,8 @@ public class IRMAKiosk {
 
     private HttpTransport transport;
     private JsonObjectParser jsonObjectParser;
-    private final String apikey = "";
-    private final Boolean debug = false;
+    private String apikey = "";
+    private final Boolean debug = true;
     private CardService cs;
     private IRMACard card;
     private JsonObject result;
@@ -52,26 +53,43 @@ public class IRMAKiosk {
 
 
     public IRMAKiosk() {
+
+
         transport = new NetHttpTransport.Builder().build();
 
         URI core = new File(System.getProperty("user.dir")).toURI().resolve("irma_configuration/");
+
+
+        Path apikeyPath = Paths.get(System.getProperty("user.dir") + "/apikey");
+        try {
+            apikey = Files.readAllLines(apikeyPath).get(0);
+        } catch (IOException e) {
+            System.out.println("Apikey file could not be read.");
+        }
+
+
         DescriptionStore.setCoreLocation(core);
         IdemixKeyStore.setCoreLocation(core);
 
         //Debug setup
-        try {
-            cs = getNewCardService();
-        } catch (CardException e) {
-            e.printStackTrace();
-        }
         PIN="0000";
         if(debug)
         {
                 card = new IRMACard();
+                cs = new SmartCardEmulatorService(card);
                 PIN = "0000";
-                //IssueThaliaRoot(cs,card);
+                IssueThaliaRoot(cs,card);
                 IssueSurfnetRoot(cs, card);
         }
+        else
+        {
+            try {
+                cs = getNewCardService();
+            } catch (CardException e) {
+                e.printStackTrace();
+            }
+        }
+
         result = verifyThaliaRoot(cs);
         if(result == null)
         {
@@ -347,9 +365,6 @@ public class IRMAKiosk {
             is.sendPin("0000".getBytes());
             ic.issue(cd, isk, attributes, null); // null indicates default expiry
 
-
-            final Path path = Paths.get(System.getProperty("user.dir"), "card.json");
-            IRMACardHelper.storeState(card, path);
 
             // Setup a connection to a real card
 //            CardService real = new TerminalCardService();   <--- doesn't exist?
